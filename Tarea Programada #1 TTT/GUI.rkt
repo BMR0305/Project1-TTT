@@ -1,0 +1,224 @@
+#lang racket/gui
+
+;Requirements to make the GUI
+(require global)
+(require 2htdp/image)
+(require 2htdp/universe)
+(require "Tic-Tac-Toe.rkt")
+
+;Define the dimensions of the game table 
+(define-global *N*
+       1
+       "Number of columns"
+       exact-nonnegative-integer?
+       string->number)
+(define-global *M*
+       1
+       "Number of rows"
+       exact-nonnegative-integer?
+       string->number)
+
+;Specifications of the game window and titles
+(define window-side 600)
+(define (tile-side_N) (/ window-side (*N*)))
+(define (tile-side_M) (/ window-side (*M*)))
+(define tile-fill-ratio 0.8)
+(define default-thickness 3)
+(define default-O-color 'Crimson)
+(define default-X-color "Forest Green")
+(define default-line-color "Midnight Blue")
+(define default-O-pen (make-pen default-O-color default-thickness "solid" "butt" "round"))
+(define default-X-pen (make-pen default-X-color default-thickness "solid" "butt" "round"))
+(define default-line-pen (make-pen default-line-color default-thickness "solid" "butt" "round"))
+
+;Function to restart the game, if state is true the game will be restored, else return the state
+(define (restart-or-return-this state)
+  (if (should-restart? state) (make-empty-game (*N*) (*M*)) state))
+
+;Function to run instructions when the user click in the window
+;param world-state x y: world-state is the infromation about the game table, x and y are the position of the mouse
+(define (process-button-down world-state x y)
+  (let ([index (index-from-mouse-click x y)])
+    (if (empty? (vector-ref world-state index)) 
+      (vector-copy-and-replace world-state index 'X)
+      world-state)))
+
+;Function to detect when the user click the window
+;param world-state x y event: If the event is a click call to process-button-down with the board and the positions, else return the board
+(define (process-mouse world-state x y event)
+  (if (equal? event "button-down")
+    (process-button-down world-state x y)
+    world-state))
+
+;Function to dectect any action of the player in the window
+;param world-state x y event: If the event is a click, make a player move and then let the computer play.
+(define (process-player-action world-state x y event)
+  (let
+    ([new-state (process-mouse world-state x y event)])
+    (if (equal? world-state new-state)
+      world-state 
+      ; If the player made his move, let the computer play.
+      (if (game-finished? new-state (*N*) (*M*))
+        (restart-or-return-this new-state)
+        (let
+          ([after-computer-state (play new-state (*N*) (*M*))])
+          (if (game-finished? after-computer-state (*N*) (*M*))
+            (restart-or-return-this after-computer-state)
+            after-computer-state)))))
+  )
+
+;Function to draw a vertical lines in the board
+;param scene x: Receives a scene and the position to add a line
+(define (draw-vertical-line scene x)
+  (add-line scene x 0 x window-side default-line-pen))
+
+;Function to draw a horizontal lines in the board
+;param scene y: Receives a scene and the position to add a line
+(define (draw-horizontal-line scene y)
+  (add-line scene 0 y window-side y default-line-pen))
+
+;Function to calculate the index of the position in the game based on the position on the mouse when the click ocurred
+;param x y: position of the mouse
+(define (index-from-mouse-click x y)
+  (+ (* (*N*) (quotient y (truncate(tile-side_M)))) (quotient x (truncate (tile-side_N)))))
+
+;Function to draw all the vertical lines
+;param i line: i multiple to draw the lines and line is to save the instruction
+(define (draw-vertical-lines-recursive i line) 
+  (cond
+    ((equal? i (*N*)) line)
+    (else (compose line (draw-vertical-lines-recursive (+ i 1) (lambda (scene) (draw-vertical-line scene (* i (tile-side_N))))))))
+    )
+
+;Function to draw all the horizontal lines
+;param i line: i multiple to draw the lines and line is to save the instruction
+(define (draw-horizontal-lines-recursive i line)
+  (cond
+    ((equal? i (*M*)) line)
+    (else (compose line (draw-horizontal-lines-recursive (+ i 1) (lambda (scene) (draw-horizontal-line scene (* i (tile-side_M))))))))
+  )
+
+;Funtion to draw an empty game board
+(define (empty-board)
+  ((compose
+     (draw-vertical-lines-recursive 0 (lambda (scene) (draw-vertical-line scene 0)))
+     (draw-horizontal-lines-recursive 0 (lambda (scene) (draw-vertical-line scene 0)))
+     ) (empty-scene window-side window-side))
+  )
+
+;Function to draw the simbol X
+(define (make-X)
+    (overlay
+      (line (* tile-fill-ratio (tile-side_N)) (* tile-fill-ratio (tile-side_M))  default-X-pen)
+      (line (- (* tile-fill-ratio (tile-side_N))) (* tile-fill-ratio (tile-side_M)) default-X-pen))
+  )
+
+;Function to draw the simbol O
+(define (make-O)
+
+  (ellipse (* tile-fill-ratio (tile-side_N)) (* tile-fill-ratio (tile-side_M)) "outline" default-O-pen)
+  )
+
+;Function to define the simbol that needs to be drawn acording to the move
+;param move: Move is the play done
+(define (image-from-move move)
+  (cond
+    [(equal? move 'X) (make-X)]
+    [(equal? move 'O) (make-O)]
+    [else empty-image]))
+
+;Function to draw the simbols on top of the empty board
+;params scene x-offset y-offset move: Scene is the empty board, x-offset and y-offset are the coordinates and move is the play done
+(define (draw-move scene x-offset y-offset move)
+  (overlay/offset (image-from-move move) x-offset y-offset scene))
+
+;Function to define all the offsets for the tiles
+;params i title-side NM: i is the multiple, for x-offset tile-side is width and NM number of columns and  for y-offset tile-side is height and NM number of rows
+(define (list-of-offsets i tile-side NM)
+  (cond
+    ((equal? i 0) empty)
+    ((positive-integer? (/ NM 2)) (cons (*  (- i 0.5) tile-side) (list-of-offsets (- i 1) tile-side NM)))
+    (else (cons (*  i tile-side) (list-of-offsets (- i 1) tile-side NM)))
+    )
+  )
+
+;Function to detect if N or M are even
+;param NM: Is the columns or rows
+(define (detect-parity NM)
+  (cond
+    ((positive-integer? (/ NM 2)) empty)
+    (else '(0))
+    )
+ )
+
+;Function to change the game vector to a matrix game
+;params i board: i is a counter and board is the game vector
+(define (moves-into-matrix i board)
+  (cond
+    ((equal? i (*M*)) empty)
+    (else (cons (drop (take board (* i (*N*))) (* (- i 1) (*N*))) (moves-into-matrix (+ i 1) board) ))
+    )
+  )
+
+;Function to draw the lines of the simbols
+;params scene y-offset list-of-moves: scene is where to draw, y-offset is the coordinate in the y axis and list-of-moves are the moves
+(define (draw-line-of-moves scene y-offset list-of-moves)
+  (foldl
+    (lambda (x-offset move the-scene) (draw-move the-scene x-offset y-offset move)) 
+    scene
+    (append (list-of-offsets (quotient (*N*) 2) (tile-side_N) (*N*)) (detect-parity (*N*)) (sort (map - (list-of-offsets (quotient (*N*) 2) (tile-side_N) (*N*))) >))
+    list-of-moves))
+
+;Function to define y-offsets and the game matrix
+;params scene world-state: scene is where to draw and world-state is the state of the game
+(define (draw-moves scene world-state)
+  (let ([board (vector->list world-state)]) 
+    (foldl
+      (lambda (y-offset list-of-moves the-scene) (draw-line-of-moves the-scene y-offset list-of-moves))
+      scene
+      (append (list-of-offsets (quotient (*M*) 2) (tile-side_M) (*M*)) (detect-parity (*M*)) (sort (map - (list-of-offsets (quotient (*M*) 2) (tile-side_M) (*M*))) >))
+      (append (list (take board (*N*))) (moves-into-matrix 2 board) (list (drop board (* (- (*M*) 1) (*N*)))))
+      
+      )
+    )
+  )
+
+;Function to initialize the drawing of the game
+;param world-state: state of the game
+(define (draw-game world-state)
+  (draw-moves (empty-board) world-state))
+
+;Function to decide the final message
+;param game: state of the game
+(define (get-end-game-message game)
+    (cond
+      [(equal? (game-evaluate game (*N*) (*M*)) 'O) "You lost."]
+      [(equal? (game-evaluate game (*N*) (*M*)) 'X) "You won!"]
+      [else "You tied."]))
+
+;Function to ask to the player if they want to play again
+;param world-state: state of the game
+(define (should-restart? world-state)
+  (equal? 1 (message-box/custom "The End" (get-end-game-message world-state) "Play Again" "Quit" #f)))
+
+;Function that evaluated if the Universe should stop base on the game state
+;param game: state of the game
+(define (should-stop? game)  
+  (game-finished? game (*N*) (*M*)))  
+
+;Function to initialize the game
+;param N M: number of columns and rows
+(define (TTT N M)
+  (cond
+    ((and (> M 2) (> N 2) (< M 11) (< N 11))
+     (global-set! *N* N) 
+     (global-set! *M* M)
+     (big-bang(make-empty-game (*N*) (*M*))
+          (name "Tic-tac-toe")
+          (on-mouse process-player-action)
+          (to-draw draw-game)
+          (stop-when should-stop?)
+       ))
+    (else (print "Error on M or N value, check if both values are more than 3 and less than 10")))
+    )
+  
